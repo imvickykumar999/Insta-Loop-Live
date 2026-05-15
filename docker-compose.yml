@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    image: insta-loop-live:latest
+    container_name: insta-loop-live
+    ports:
+      - "3000:5000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+      - ./ig_stream_config.json:/app/ig_stream_config.json
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+uploads/*
+logs/*
+ig_stream_config.json
+InstagramLiveStreamFile.py
+*.md
