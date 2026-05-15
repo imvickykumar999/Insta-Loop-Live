@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Instagram Live Streamer</title>
+  <style>
+    :root {
+      --bg: #121212;
+      --fg: #ffffff;
+      --entry-bg: #262626;
+      --accent-pink: #E1306C;
+      --accent-purple: #833AB4;
+      --button-bg: #C13584;
+      --button-hover: #E1306C;
+      --success: #4caf50;
+      --error: #f44336;
+      --border: #333333;
+      --muted: #999999;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 3rem;
+    }
+    header { text-align: center; margin-bottom: 2rem; }
+    header h1 {
+      margin: 0;
+      font-size: 2rem;
+      color: var(--accent-pink);
+    }
+    header p { color: var(--muted); margin: 0.5rem 0 0; font-size: 0.95rem; }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+      font-size: 0.9rem;
+    }
+    .field { margin-bottom: 1.1rem; }
+    input[type="text"],
+    input[type="password"],
+    input[type="file"] {
+      width: 100%;
+      padding: 0.65rem 0.75rem;
+      background: var(--entry-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--fg);
+      font-size: 0.95rem;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--accent-pink);
+    }
+    .row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .row input { flex: 1; }
+    .check { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.5rem; font-weight: normal; }
+    .btn {
+      border: none;
+      border-radius: 8px;
+      padding: 0.65rem 1.25rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--button-bg);
+      color: var(--fg);
+      font-size: 0.9rem;
+      transition: background 0.15s;
+    }
+    .btn:hover:not(:disabled) { background: var(--button-hover); }
+    .btn:disabled { background: #555; color: #999; cursor: not-allowed; }
+    .btn.secondary { background: #444; }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      justify-content: center;
+      margin: 1.5rem 0;
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin: 1rem 0;
+    }
+    .dot { font-size: 1.1rem; }
+    .dot.ready { color: var(--success); }
+    .dot.live { color: var(--accent-pink); }
+    .dot.error { color: var(--error); }
+    .dot.stopping { color: var(--muted); }
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 1rem 0 0.4rem;
+    }
+    .log-header span { font-weight: 600; font-size: 0.85rem; }
+    #log {
+      height: 280px;
+      overflow-y: auto;
+      background: var(--entry-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      font-family: Consolas, monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+    .toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      background: var(--entry-bg);
+      border: 1px solid var(--border);
+      display: none;
+      max-width: 320px;
+      z-index: 10;
+    }
+    .toast.show { display: block; }
+    .toast.error { border-color: var(--error); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Instagram Live</h1>
+      <p>Stream to your followers in vertical format</p>
+    </header>
+
+    <div class="field">
+      <label for="video">Video source (server path)</label>
+      <div class="row">
+        <input type="text" id="video" placeholder="/path/to/video.mp4">
+        <button type="button" class="btn secondary" id="browseBtn">Upload</button>
+      </div>
+      <input type="file" id="fileInput" accept="video/*" hidden>
+      <p class="hint">Upload sets the path on this server, or enter an absolute path to an existing file.</p>
+    </div>
+
+    <div class="field">
+      <label for="rtmp">RTMP URL</label>
+      <input type="text" id="rtmp" placeholder="rtmps://live-upload.instagram.com:443/rtmp/">
+    </div>
+
+    <div class="field">
+      <label for="key">Stream key</label>
+      <input type="password" id="key" placeholder="Your Instagram stream key">
+      <label class="check">
+        <input type="checkbox" id="showKey"> Show key
+      </label>
+    </div>
+
+    <div class="controls">
+      <button type="button" class="btn" id="startBtn">▶ Go Live</button>
+      <button type="button" class="btn" id="stopBtn" disabled>⏹ Stop stream</button>
+    </div>
+
+    <div class="controls">
+      <button type="button" class="btn secondary" id="saveBtn">Save settings</button>
+      <button type="button" class="btn secondary" id="loadBtn">Load settings</button>
+    </div>
+
+    <div class="status-bar">
+      <span class="dot ready" id="dot">●</span>
+      <strong id="statusText">Ready to stream</strong>
+    </div>
+
+    <div class="log-header">
+      <span>Streaming console output</span>
+      <button type="button" class="btn secondary" id="clearLogBtn">Clear logs</button>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const video = document.getElementById("video");
+    const rtmp = document.getElementById("rtmp");
+    const key = document.getElementById("key");
+    const showKey = document.getElementById("showKey");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const saveBtn = document.getElementById("saveBtn");
+    const loadBtn = document.getElementById("loadBtn");
+    const clearLogBtn = document.getElementById("clearLogBtn");
+    const browseBtn = document.getElementById("browseBtn");
+    const fileInput = document.getElementById("fileInput");
+    const logEl = document.getElementById("log");
+    const statusText = document.getElementById("statusText");
+    const dot = document.getElementById("dot");
+    const toast = document.getElementById("toast");
+
+    let logSince = 0;
+    let polling = null;
+
+    function showToast(msg, isError) {
+      toast.textContent = msg;
+      toast.className = "toast show" + (isError ? " error" : "");
+      setTimeout(() => toast.classList.remove("show"), 3500);
+    }
+
+    showKey.addEventListener("change", () => {
+      key.type = showKey.checked ? "text" : "password";
+    });
+
+    browseBtn.addEventListener("click", () => fileInput.click());
+
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append("video", file);
+      browseBtn.disabled = true;
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Upload failed");
+        video.value = data.path;
+        showToast("Uploaded: " + data.filename);
+      } catch (e) {
+        showToast(e.message, true);
+      } finally {
+        browseBtn.disabled = false;
+        fileInput.value = "";
+      }
+    });
+
+    function payload() {
+      return {
+        video: video.value.trim(),
+        url: rtmp.value.trim(),
+        key: key.value.trim(),
+      };
+    }
+
+    function setUiStreaming(live) {
+      startBtn.disabled = live;
+      stopBtn.disabled = !live;
+    }
+
+    function applyStatus(s) {
+      statusText.textContent = s.status;
+      dot.className = "dot " + (s.status_kind || "ready");
+      setUiStreaming(s.streaming);
+    }
+
+    async function pollLogs() {
+      try {
+        const res = await fetch("/api/logs?since=" + logSince);
+        const data = await res.json();
+        if (data.lines && data.lines.length) {
+          logEl.textContent += data.lines.join("\n") + "\n";
+          logEl.scrollTop = logEl.scrollHeight;
+        }
+        logSince = data.next ?? logSince;
+      } catch (_) {}
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch("/api/status");
+        applyStatus(await res.json());
+      } catch (_) {}
+    }
+
+    function startPolling() {
+      if (polling) return;
+      polling = setInterval(() => {
+        pollLogs();
+        pollStatus();
+      }, 800);
+    }
+
+    startBtn.addEventListener("click", async () => {
+      const body = payload();
+      try {
+        const res = await fetch("/api/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.message);
+        showToast(data.message);
+        startPolling();
+        pollStatus();
+      } catch (e) {
+        showToast(e.message, true);
+      }
+    });
+
+    stopBtn.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/stop", { method: "POST" });
+        const data = await res.json();
+        showToast(data.message || "Stopped");
+        pollStatus();
+      } catch (e) {
+        showToast(e.message, true);
+      }
+    });
+
+    saveBtn.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload()),
+        });
+        const data = await res.json();
+        showToast(data.message || "Saved");
+        logSince = 0;
+        pollLogs();
+      } catch (e) {
+        showToast(e.message, true);
+      }
+    });
+
+    loadBtn.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/config");
+        const data = await res.json();
+        video.value = data.video || "";
+        rtmp.value = data.url || "";
+        key.value = data.key || "";
+        showToast("Settings loaded");
+        logSince = 0;
+        pollLogs();
+      } catch (e) {
+        showToast(e.message, true);
+      }
+    });
+
+    clearLogBtn.addEventListener("click", async () => {
+      await fetch("/api/logs/clear", { method: "POST" });
+      logEl.textContent = "";
+      logSince = 0;
+    });
+
+    (async () => {
+      try {
+        const res = await fetch("/api/config");
+        const data = await res.json();
+        video.value = data.video || "";
+        rtmp.value = data.url || "";
+        key.value = data.key || "";
+      } catch (_) {}
+      startPolling();
+    })();
+  </script>
+</body>
+</html>

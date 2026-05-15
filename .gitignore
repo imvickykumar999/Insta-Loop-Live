@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+ig_stream_config.json
+uploads/
+logs/
