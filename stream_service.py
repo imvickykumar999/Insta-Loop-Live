@@ -10,6 +10,8 @@ import time
 from collections import deque
 from datetime import datetime
 
+from telegram_notify import is_configured, send_telegram
+
 CONFIG_FILE = "ig_stream_config.json"
 LOG_FILE = "logs/insta_stream.log"
 MAX_LOG_LINES = 500
@@ -43,8 +45,15 @@ class StreamService:
         self._status_kind = "ready"  # ready | live | error | stopping
         self._restart_count = 0
         self._stop_requested = False
+        self._live_notified = False
 
         os.makedirs("logs", exist_ok=True)
+        if is_configured():
+            self._append_log("Telegram notifications enabled.")
+        else:
+            self._append_log(
+                "Telegram notifications disabled (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)."
+            )
         self._start_output_reader()
 
     def _start_output_reader(self):
@@ -141,6 +150,7 @@ class StreamService:
         self._stream_key = stream_key
         self._stop_requested = False
         self._restart_count = 0
+        self._live_notified = False
         self.streaming = True
         self._set_status("Starting Instagram Live...", "ready")
 
@@ -171,7 +181,26 @@ class StreamService:
 
         self._set_status("Stream stopped", "ready")
         self._append_log("Stream stopped.")
+        self._notify_stopped(user_requested=True)
         return True, "Stream stopped."
+
+    def _notify_live(self) -> None:
+        if self._live_notified:
+            return
+        self._live_notified = True
+        video = os.path.basename(self._video_path) or "unknown"
+        send_telegram(
+            f"🟢 Instagram Live started\nVideo: {video}",
+            on_error=lambda e: self._append_log(f"Telegram notify failed: {e}"),
+        )
+
+    def _notify_stopped(self, user_requested: bool = True) -> None:
+        self._live_notified = False
+        reason = "stopped by user" if user_requested else "stream ended"
+        send_telegram(
+            f"⏹ Instagram Live {reason}",
+            on_error=lambda e: self._append_log(f"Telegram notify failed: {e}"),
+        )
 
     def _terminate_proc(self, proc: subprocess.Popen) -> None:
         if proc.poll() is not None:
@@ -266,6 +295,7 @@ class StreamService:
                 self.ffmpeg_process = proc
 
             self._set_status("LIVE on Instagram", "live")
+            self._notify_live()
 
             assert proc.stdout is not None
             for line in iter(proc.stdout.readline, ""):
@@ -308,6 +338,7 @@ class StreamService:
                 )
                 self._set_status("Stream ended — check stream key", "error")
                 self.streaming = False
+                self._notify_stopped(user_requested=False)
                 break
 
             self._append_log(

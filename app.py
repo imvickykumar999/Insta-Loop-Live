@@ -7,10 +7,15 @@ import tempfile
 import time
 from functools import wraps
 
+from env_loader import load_env
+
+load_env()
+
 from flask import Flask, jsonify, render_template, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from stream_service import StreamService
+from telegram_notify import is_configured, send_telegram_sync
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2 GB uploads
@@ -190,6 +195,22 @@ def api_logs():
 def api_clear_logs():
     stream.clear_logs()
     return jsonify({"ok": True})
+
+
+@app.route("/api/telegram/test", methods=["POST"])
+@login_required_api
+def api_telegram_test():
+    if not is_configured():
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env",
+            }
+        ), 400
+    ok, detail = send_telegram_sync("Insta-Loop-Live: test notification")
+    if ok:
+        return jsonify({"ok": True, "message": "Telegram test sent."})
+    return jsonify({"ok": False, "error": detail}), 500
 
 
 if __name__ == "__main__":

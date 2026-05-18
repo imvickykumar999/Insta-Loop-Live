@@ -1,10 +1,12 @@
 services:
   app:
     build: .
-    image: insta-loop-live:latest
+    image: imvickykumar999/insta-loop-live:latest
     container_name: insta-loop-live
     ports:
       - "3000:5000"
+    env_file:
+      - .env
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs

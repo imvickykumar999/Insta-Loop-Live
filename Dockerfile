@@ -9,7 +9,7 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py stream_service.py ./
+COPY app.py stream_service.py telegram_notify.py env_loader.py ./
 COPY templates/ templates/
 
 RUN groupadd -g 1000 appuser \
