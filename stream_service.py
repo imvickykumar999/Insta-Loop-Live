@@ -6,12 +6,26 @@ import platform
 import queue
 import subprocess
 import threading
+import time
 from collections import deque
 from datetime import datetime
 
 CONFIG_FILE = "ig_stream_config.json"
 LOG_FILE = "logs/insta_stream.log"
 MAX_LOG_LINES = 500
+MAX_AUTO_RESTARTS = 5
+RESTART_DELAY_SEC = 3
+
+
+def build_rtmp_url(rtmp_url: str, stream_key: str) -> str:
+    """Join RTMP base URL and stream key (Instagram: rtmps://host/rtmp/KEY)."""
+    base = rtmp_url.strip()
+    key = stream_key.strip()
+    if not base or not key:
+        return ""
+    if key.startswith("?"):
+        return f"{base.rstrip('/')}{key}"
+    return f"{base.rstrip('/')}/{key.lstrip('/')}"
 
 
 class StreamService:
@@ -27,6 +41,8 @@ class StreamService:
         self._stream_key = ""
         self._status = "Ready to stream"
         self._status_kind = "ready"  # ready | live | error | stopping
+        self._restart_count = 0
+        self._stop_requested = False
 
         os.makedirs("logs", exist_ok=True)
         self._start_output_reader()
@@ -123,6 +139,8 @@ class StreamService:
         self._video_path = video
         self._rtmp_url = rtmp_url
         self._stream_key = stream_key
+        self._stop_requested = False
+        self._restart_count = 0
         self.streaming = True
         self._set_status("Starting Instagram Live...", "ready")
 
@@ -131,11 +149,14 @@ class StreamService:
         return True, "Stream starting."
 
     def stop_stream(self):
+        self._stop_requested = True
         self.streaming = False
         self._set_status("Stopping...", "stopping")
 
-        proc = self.ffmpeg_process
-        if proc:
+        with self._lock:
+            proc = self.ffmpeg_process
+
+        if proc and proc.poll() is None:
             try:
                 if platform.system() == "Windows":
                     subprocess.run(
@@ -148,18 +169,35 @@ class StreamService:
             except OSError:
                 pass
 
-        self.ffmpeg_process = None
         self._set_status("Stream stopped", "ready")
         self._append_log("Stream stopped.")
         return True, "Stream stopped."
 
-    def _run_ffmpeg(self):
-        video = self._video_path
-        url = self._rtmp_url
-        key = self._stream_key
+    def _terminate_proc(self, proc: subprocess.Popen) -> None:
+        if proc.poll() is not None:
+            return
+        try:
+            if platform.system() == "Windows":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True,
+                    check=False,
+                )
+            else:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        except OSError:
+            pass
 
-        cmd = [
+    def _ffmpeg_cmd(self, video: str, rtmp_target: str) -> list[str]:
+        return [
             "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "info",
             "-re",
             "-stream_loop",
             "-1",
@@ -167,10 +205,16 @@ class StreamService:
             video,
             "-vf",
             "crop=in_h*9/16:in_h,scale=720:1280",
+            "-r",
+            "30",
             "-c:v",
             "libx264",
             "-preset",
-            "superfast",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "main",
             "-b:v",
             "2500k",
             "-maxrate",
@@ -181,6 +225,10 @@ class StreamService:
             "yuv420p",
             "-g",
             "60",
+            "-keyint_min",
+            "60",
+            "-sc_threshold",
+            "0",
             "-c:a",
             "aac",
             "-b:a",
@@ -189,31 +237,87 @@ class StreamService:
             "44100",
             "-f",
             "flv",
-            f"{url}{key}",
+            rtmp_target,
         ]
 
+    def _run_ffmpeg_once(self) -> int | None:
+        video = self._video_path
+        rtmp_target = build_rtmp_url(self._rtmp_url, self._stream_key)
+        if not rtmp_target:
+            self._append_log("Invalid RTMP URL or stream key.")
+            return -1
+
+        cmd = self._ffmpeg_cmd(video, rtmp_target)
         self._append_log("Launching FFmpeg...")
+        self._append_log(f"Video: {video}")
+
+        proc: subprocess.Popen | None = None
+        return_code: int | None = None
 
         try:
-            self.ffmpeg_process = subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 bufsize=1,
             )
+            with self._lock:
+                self.ffmpeg_process = proc
+
             self._set_status("LIVE on Instagram", "live")
 
-            for line in iter(self.ffmpeg_process.stdout.readline, ""):
+            assert proc.stdout is not None
+            for line in iter(proc.stdout.readline, ""):
                 if not self.streaming:
                     break
                 if line.strip():
                     self.output_queue.put(line.strip())
-
-            self.ffmpeg_process.wait()
         except Exception as e:
             self._append_log(f"Execution error: {e}")
             self._set_status(f"Error: {e}", "error")
+            return -1
+        finally:
+            if proc is not None:
+                try:
+                    if proc.stdout:
+                        proc.stdout.close()
+                except OSError:
+                    pass
+                if self.streaming:
+                    self._terminate_proc(proc)
+                return_code = proc.wait()
+                with self._lock:
+                    if self.ffmpeg_process is proc:
+                        self.ffmpeg_process = None
 
-        if self.streaming:
-            self.stop_stream()
+        return return_code
+
+    def _run_ffmpeg(self):
+        while self.streaming and not self._stop_requested:
+            return_code = self._run_ffmpeg_once()
+
+            if self._stop_requested or not self.streaming:
+                break
+
+            self._restart_count += 1
+            if self._restart_count > MAX_AUTO_RESTARTS:
+                self._append_log(
+                    f"Stream ended (FFmpeg code {return_code}). "
+                    "Max reconnect attempts reached. Refresh your Instagram stream key and try again."
+                )
+                self._set_status("Stream ended — check stream key", "error")
+                self.streaming = False
+                break
+
+            self._append_log(
+                f"Stream disconnected (FFmpeg code {return_code}). "
+                f"Reconnecting in {RESTART_DELAY_SEC}s "
+                f"({self._restart_count}/{MAX_AUTO_RESTARTS})..."
+            )
+            self._set_status("Reconnecting...", "ready")
+            time.sleep(RESTART_DELAY_SEC)
+
+        self.streaming = False
+        with self._lock:
+            self.ffmpeg_process = None

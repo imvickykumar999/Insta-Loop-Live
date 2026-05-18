@@ -133,10 +133,58 @@
     }
     .toast.show { display: block; }
     .toast.error { border-color: var(--error); }
+    .auth-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+      padding: 1rem;
+      background: var(--entry-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .auth-bar.guest { border-color: var(--accent-pink); }
+    .auth-fields { display: flex; flex-wrap: wrap; gap: 0.5rem; flex: 1; }
+    .auth-fields input { width: auto; min-width: 140px; flex: 1; }
+    .auth-user { color: var(--muted); font-size: 0.9rem; margin: 0; }
+    .guest-banner {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin: -1rem 0 1.25rem;
+    }
+    .locked input,
+    .locked button {
+      pointer-events: none;
+      opacity: 0.55;
+    }
+    .log-section { margin-top: 0.5rem; }
+    .locked .log-actions {
+      pointer-events: none;
+      opacity: 0.55;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="wrap" id="appRoot">
+    <div class="auth-bar{% if not authenticated %} guest{% endif %}" id="authBar">
+      <div class="auth-fields" id="loginFields"{% if authenticated %} hidden{% endif %}>
+        <input type="text" id="loginUser" placeholder="Username" autocomplete="username">
+        <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
+        <button type="button" class="btn" id="loginBtn">Log in</button>
+      </div>
+      <p class="auth-user" id="authUser"{% if not authenticated %} hidden{% endif %}>
+        Signed in as <strong id="authName">{% if authenticated %}{{ session.username }}{% endif %}</strong>
+      </p>
+      <button type="button" class="btn secondary" id="logoutBtn"{% if not authenticated %} hidden{% endif %}>Log out</button>
+    </div>
+    <p class="guest-banner" id="guestBanner"{% if authenticated %} hidden{% endif %}>
+      View-only mode — log in to upload, stream, and change settings.
+    </p>
+
+    <div id="streamPanel" class="{% if not authenticated %}locked{% endif %}">
     <header>
       <h1>Instagram Live</h1>
       <p>Stream to your followers in vertical format</p>
@@ -179,12 +227,15 @@
       <span class="dot ready" id="dot">●</span>
       <strong id="statusText">Ready to stream</strong>
     </div>
-
-    <div class="log-header">
-      <span>Streaming console output</span>
-      <button type="button" class="btn secondary" id="clearLogBtn">Clear logs</button>
     </div>
-    <div id="log"></div>
+
+    <div class="log-section" id="logSection">
+      <div class="log-header">
+        <span>Streaming console output</span>
+        <button type="button" class="btn secondary log-actions" id="clearLogBtn">Clear logs</button>
+      </div>
+      <div id="log"></div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -205,9 +256,20 @@
     const statusText = document.getElementById("statusText");
     const dot = document.getElementById("dot");
     const toast = document.getElementById("toast");
+    const streamPanel = document.getElementById("streamPanel");
+    const authBar = document.getElementById("authBar");
+    const loginFields = document.getElementById("loginFields");
+    const loginUser = document.getElementById("loginUser");
+    const loginPass = document.getElementById("loginPass");
+    const loginBtn = document.getElementById("loginBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const authUser = document.getElementById("authUser");
+    const authName = document.getElementById("authName");
+    const guestBanner = document.getElementById("guestBanner");
 
     let logSince = 0;
     let polling = null;
+    let authenticated = {{ "true" if authenticated else "false" }};
 
     function showToast(msg, isError) {
       toast.textContent = msg;
@@ -228,8 +290,7 @@
       fd.append("video", file);
       browseBtn.disabled = true;
       try {
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        const data = await res.json();
+        const { data } = await apiFetch("/api/upload", { method: "POST", body: fd });
         if (!data.ok) throw new Error(data.error || "Upload failed");
         video.value = data.path;
         showToast("Uploaded: " + data.filename);
@@ -273,9 +334,10 @@
     }
 
     async function pollStatus() {
+      if (!authenticated) return;
       try {
-        const res = await fetch("/api/status");
-        applyStatus(await res.json());
+        const { data } = await apiFetch("/api/status");
+        applyStatus(data);
       } catch (_) {}
     }
 
@@ -283,19 +345,83 @@
       if (polling) return;
       polling = setInterval(() => {
         pollLogs();
-        pollStatus();
+        if (authenticated) pollStatus();
       }, 800);
     }
+
+    function setAuthUi(loggedIn, username) {
+      authenticated = loggedIn;
+      streamPanel.classList.toggle("locked", !loggedIn);
+      document.getElementById("logSection")?.classList.toggle("locked", !loggedIn);
+      authBar.classList.toggle("guest", !loggedIn);
+      loginFields.hidden = loggedIn;
+      authUser.hidden = !loggedIn;
+      logoutBtn.hidden = !loggedIn;
+      guestBanner.hidden = loggedIn;
+      if (loggedIn && username) authName.textContent = username;
+      if (loggedIn) {
+        pollStatus();
+        loadBtn.click();
+      } else {
+        statusText.textContent = "Log in to stream";
+        dot.className = "dot ready";
+        setUiStreaming(false);
+      }
+      startPolling();
+    }
+
+    async function apiFetch(url, options = {}) {
+      const res = await fetch(url, options);
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setAuthUi(false);
+        throw new Error(data.error || "Login required.");
+      }
+      return { res, data };
+    }
+
+    loginBtn.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: loginUser.value.trim(),
+            password: loginPass.value,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Login failed");
+        loginPass.value = "";
+        setAuthUi(true, data.username);
+        showToast(data.message || "Logged in");
+      } catch (e) {
+        showToast(e.message, true);
+      }
+    });
+
+    loginPass.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") loginBtn.click();
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        await apiFetch("/api/auth/logout", { method: "POST" });
+        setAuthUi(false);
+        showToast("Logged out");
+      } catch (e) {
+        showToast(e.message, true);
+      }
+    });
 
     startBtn.addEventListener("click", async () => {
       const body = payload();
       try {
-        const res = await fetch("/api/start", {
+        const { data } = await apiFetch("/api/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
         if (!data.ok) throw new Error(data.message);
         showToast(data.message);
         startPolling();
@@ -307,8 +433,7 @@
 
     stopBtn.addEventListener("click", async () => {
       try {
-        const res = await fetch("/api/stop", { method: "POST" });
-        const data = await res.json();
+        const { data } = await apiFetch("/api/stop", { method: "POST" });
         showToast(data.message || "Stopped");
         pollStatus();
       } catch (e) {
@@ -318,12 +443,11 @@
 
     saveBtn.addEventListener("click", async () => {
       try {
-        const res = await fetch("/api/config", {
+        const { data } = await apiFetch("/api/config", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload()),
         });
-        const data = await res.json();
         showToast(data.message || "Saved");
         logSince = 0;
         pollLogs();
@@ -334,8 +458,7 @@
 
     loadBtn.addEventListener("click", async () => {
       try {
-        const res = await fetch("/api/config");
-        const data = await res.json();
+        const { data } = await apiFetch("/api/config");
         video.value = data.video || "";
         rtmp.value = data.url || "";
         key.value = data.key || "";
@@ -348,20 +471,23 @@
     });
 
     clearLogBtn.addEventListener("click", async () => {
-      await fetch("/api/logs/clear", { method: "POST" });
-      logEl.textContent = "";
-      logSince = 0;
+      try {
+        await apiFetch("/api/logs/clear", { method: "POST" });
+        logEl.textContent = "";
+        logSince = 0;
+      } catch (e) {
+        showToast(e.message, true);
+      }
     });
 
     (async () => {
       try {
-        const res = await fetch("/api/config");
+        const res = await fetch("/api/auth/session");
         const data = await res.json();
-        video.value = data.video || "";
-        rtmp.value = data.url || "";
-        key.value = data.key || "";
-      } catch (_) {}
-      startPolling();
+        setAuthUi(data.authenticated, data.username);
+      } catch (_) {
+        setAuthUi(false);
+      }
     })();
   </script>
 </body>

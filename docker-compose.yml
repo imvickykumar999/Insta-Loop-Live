@@ -9,4 +9,9 @@ services:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
       - ./ig_stream_config.json:/app/ig_stream_config.json
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:-changeme}
+    user: "1000:1000"
     restart: unless-stopped
