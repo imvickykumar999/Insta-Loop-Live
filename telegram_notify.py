@@ -2,10 +2,6 @@
 
 import json
 import os
-
-from env_loader import load_env
-
-load_env()
 import threading
 import urllib.error
 import urllib.request

@@ -15,5 +15,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       APP_USERNAME: ${APP_USERNAME:-admin}
       APP_PASSWORD: ${APP_PASSWORD:-changeme}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     user: "1000:1000"
     restart: unless-stopped
