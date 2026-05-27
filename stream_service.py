@@ -233,7 +233,7 @@ class StreamService:
             "-i",
             video,
             "-vf",
-            "crop=in_h*9/16:in_h,scale=720:1280",
+            "crop=min(in_w\,in_h*9/16):in_h,scale=720:1280",
             "-r",
             "30",
             "-c:v",

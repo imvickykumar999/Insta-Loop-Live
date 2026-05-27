@@ -313,7 +313,7 @@ class InstagramStreamerGUI:
         # Instagram vertical format command
         cmd = [
             "ffmpeg", "-re", "-stream_loop", "-1", "-i", video,
-            "-vf", "crop=in_h*9/16:in_h,scale=720:1280", 
+            "-vf", "crop=min(in_w,in_h*9/16):in_h,scale=720:1280", 
             "-c:v", "libx264", "-preset", "superfast", "-b:v", "2500k",
             "-maxrate", "2500k", "-bufsize", "5000k", "-pix_fmt", "yuv420p",
             "-g", "60", "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
