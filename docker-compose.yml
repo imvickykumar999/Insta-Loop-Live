@@ -3,8 +3,8 @@ services:
     build: .
     image: imvickykumar999/insta-loop-live:latest
     container_name: insta-loop-live
-    ports:
-      - "3000:5000"
+    expose:
+      - "5000"
     env_file:
       - .env
     volumes:
@@ -12,10 +12,31 @@ services:
       - ./logs:/app/logs
       - ./ig_stream_config.json:/app/ig_stream_config.json
     environment:
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      SECRET_KEY: ${SECRET_KEY:-df1ea67d-b8e2-47bc-a989-bae690e1e790}
       APP_USERNAME: ${APP_USERNAME:-admin}
-      APP_PASSWORD: ${APP_PASSWORD:-changeme}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      APP_PASSWORD: ${APP_PASSWORD:-password}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-8593260072:AAF_IR7H9AJ00VgSwasZX8Hdk3Cnbm0pwbk}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-8461529217}
     user: "1000:1000"
     restart: unless-stopped
+    networks:
+      - insta-network
+
+  nginx:
+    image: nginx:latest
+    container_name: insta-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - insta-network
+
+networks:
+  insta-network:
+    driver: bridge

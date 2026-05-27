@@ -19,7 +19,7 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 
 APP_USERNAME = os.environ.get("APP_USERNAME", "admin")
 APP_PASSWORD_HASH = generate_password_hash(
-    os.environ.get("APP_PASSWORD", "changeme")
+    os.environ.get("APP_PASSWORD", "password")
 )
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
