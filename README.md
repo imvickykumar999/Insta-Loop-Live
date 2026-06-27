@@ -4,7 +4,7 @@ Go Live on Instagram, Loop a Video.
 
 Web UI to loop a local video and stream it to Instagram Live via RTMP (FFmpeg, vertical 720×1280).
 
-<img width="1536" height="981" alt="image" src="https://github.com/user-attachments/assets/15bafaf6-0492-40c1-9b9e-f43ec6d9a8c6" />
+![ss](https://github.com/user-attachments/assets/15bafaf6-0492-40c1-9b9e-f43ec6d9a8c6)
 
 ## Docker Hub
 
@@ -69,6 +69,22 @@ docker run -d \
 ```
 
 > **Security:** Do not commit `ig_stream_config.json` to git; it contains your stream key.
+
+## Troubleshooting: Permission Denied Error
+
+If you see a `PermissionError: [Errno 13] Permission denied` in logs or when uploading a video/saving configuration, it is because the Docker container runs as a non-root user `appuser` (UID `1000`), but the directories and config file on the host were created by the root user.
+
+To fix this, change the ownership of these files/folders on the host to UID/GID `1000`:
+
+```bash
+sudo chown -R 1000:1000 ig_stream_config.json uploads logs
+```
+
+Then, restart the container:
+
+```bash
+docker restart insta-loop-live
+```
 
 ## Using the app
 
